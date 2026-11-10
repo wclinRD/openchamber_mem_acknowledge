@@ -483,8 +483,10 @@ export function startLocalServer(port) {
             res.writeHead(200, { 'content-type': 'application/json' });
             res.end(result.content);
           } else if (req.method === 'DELETE') {
-            let deleteParams = {};
-            try { deleteParams = JSON.parse(req.body || {}); } catch {}
+            let deleteBody = '';
+            for await (const chunk of req) deleteBody += chunk;
+            let deleteParams = { kind: 'note' };
+            try { deleteParams = JSON.parse(deleteBody || '{}'); } catch {}
             const deleteResult = await callOpenChamberTool(
               { sessionID: 'webui-session', id: 'webui-call', signal: null },
               'openchamber_knowledge',

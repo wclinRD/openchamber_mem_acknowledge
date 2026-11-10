@@ -72,7 +72,7 @@ function isAcknowledgeKnowledge(k) {
   return (k.title || "").trim().startsWith("📌 Acknowledge: ") || (k.title || "").trim().startsWith("Acknowledge: ");
 }
 
-function makeMemoryBridgeMode(ctx, memoryBridgeInput) {
+async function makeMemoryBridgeMode(ctx, memoryBridgeInput) {
   const { mode } = memoryBridgeInput;
   switch (mode) {
     case "list-memory":
@@ -97,7 +97,7 @@ function makeMemoryBridgeMode(ctx, memoryBridgeInput) {
         },
       });
     case "delete-memory":
-      return callOpenChamberTool(ctx, "openchamberMemory", {
+      return callOpenChamberTool(ctx, "openchamber_memory", {
         action: "memory.delete",
         parameters: { memoryId: memoryBridgeInput.memoryId, scope: memoryBridgeInput.scope },
       });
