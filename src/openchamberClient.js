@@ -92,7 +92,7 @@ export async function callOpenChamberTool(ctx, toolName, input) {
       content: JSON.stringify({
         schemaVersion: 1,
         ok: false,
-        action: input?.mode || toolName,
+        action: input?.action || toolName,
         error: {
           message: sanitizeError("OpenChamber returned an invalid response"),
           kind: "runtime",
@@ -102,7 +102,7 @@ export async function callOpenChamberTool(ctx, toolName, input) {
       metadata: {
         openchamber: {
           schemaVersion: 1,
-          action: input?.mode || toolName,
+          action: input?.action || toolName,
           ok: false,
         },
       },
@@ -112,7 +112,7 @@ export async function callOpenChamberTool(ctx, toolName, input) {
       content: JSON.stringify({
         schemaVersion: 1,
         ok: false,
-        action: input?.mode || toolName,
+        action: input?.action || toolName,
         error: {
           message: sanitizeError(error instanceof Error ? error.message : String(error)),
           kind: "runtime",
@@ -121,7 +121,7 @@ export async function callOpenChamberTool(ctx, toolName, input) {
       metadata: {
         openchamber: {
           schemaVersion: 1,
-          action: input?.mode || toolName,
+          action: input?.action || toolName,
           ok: false,
         },
       },
