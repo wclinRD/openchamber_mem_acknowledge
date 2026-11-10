@@ -108,7 +108,6 @@ export function validateConflictMemory(existingMemories, importMemories) {
 }
 
 export function validateConflictKnowledge(existingKnowledge, importKnowledge, policy) {
-  if (policy === "upsert") return [];
   const errors = [];
   const seenIds = new Map();
   for (const k of existingKnowledge) {
@@ -118,7 +117,9 @@ export function validateConflictKnowledge(existingKnowledge, importKnowledge, po
   }
   for (const k of importKnowledge) {
     const key = `${k.kind}:${k.id}`;
-    if (seenIds.has(key)) errors.push(`Conflict: knowledge ${key} already exists in the target`);
+    if (seenIds.has(key)) {
+      if (policy === "error") errors.push(`Conflict: knowledge ${key} already exists in the target`);
+    }
   }
   return errors;
 }

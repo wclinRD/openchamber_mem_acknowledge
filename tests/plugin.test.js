@@ -49,10 +49,17 @@ describe('conflict utilities', () => {
     assert.deepEqual(errors, []);
   });
 
-  it('rejects knowledge conflict under skip policy', () => {
+  it('skips knowledge conflict under skip policy', () => {
     const existing = [{ kind: 'note', id: 'k1', body: 'a' }];
     const imported = [{ kind: 'note', id: 'k1', body: 'b' }];
     const errors = validateConflictKnowledge(existing, imported, 'skip');
+    assert.deepEqual(errors, []);
+  });
+
+  it('rejects knowledge conflict under error policy', () => {
+    const existing = [{ kind: 'note', id: 'k1', body: 'a' }];
+    const imported = [{ kind: 'note', id: 'k1', body: 'b' }];
+    const errors = validateConflictKnowledge(existing, imported, 'error');
     assert.ok(errors.length > 0);
   });
 });

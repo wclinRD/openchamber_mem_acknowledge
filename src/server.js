@@ -2,10 +2,25 @@ import http from "http";
 import { readFile, writeFile } from "fs/promises";
 import { callOpenChamberTool } from "./openchamberClient.js";
 import { validateBackupPayload, validateConflictMemory, validateConflictKnowledge } from "./backup.js";
+import { resolve, isAbsolute } from "path";
 
 process.on("unhandledRejection", (err) => {
   console.error(`[openchamber-memory-bridge] Unhandled rejection:`, err);
 });
+
+process.on("uncaughtException", (err) => {
+  console.error(`[openchamber-memory-bridge] Uncaught exception:`, err);
+});
+
+const normalizeAllowedPath = (inputPath) => {
+  const raw = inputPath || "";
+  if (typeof raw !== "string" || raw.includes("..")) return null;
+  const resolved = resolve(raw);
+  if (isAbsolute(resolved) && !resolved.startsWith("/Users/wclin/")) {
+    return null;
+  }
+  return resolved;
+};
 
 const uiHTML = `<!DOCTYPE html>
 <html lang="zh-TW">
@@ -569,6 +584,11 @@ export function startLocalServer(port) {
           handleApiError(res, 'Missing path', 400);
           return;
         }
+        const allowedPath = normalizeAllowedPath(path);
+        if (!allowedPath) {
+          handleApiError(res, 'Invalid path: path must be non-absolute and not contain ".."', 400);
+          return;
+        }
         try {
           const memoryResult = await callOpenChamberTool(
             { sessionID: 'webui-session', id: 'webui-call', signal: null },
@@ -693,7 +713,6 @@ export function startLocalServer(port) {
     console.log(`[openchamber-memory-bridge] local web server listening on http://127.0.0.1:${port}`);
   });
 
-  server.closeAllConnections?.();
   return server;
 }
 

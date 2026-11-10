@@ -21,13 +21,13 @@ export async function callOpenChamberTool(ctx, toolName, input) {
       content: JSON.stringify({
         schemaVersion: 1,
         ok: false,
-        action: input?.mode || toolName,
+        action: input?.action || toolName,
         error: { message: "OPENCHAMBER_MANAGED_TOOL_UNAVAILABLE", kind: "configuration" },
       }),
       metadata: {
         openchamber: {
           schemaVersion: 1,
-          action: input?.mode || toolName,
+          action: input?.action || toolName,
           ok: false,
         },
       },
@@ -62,7 +62,7 @@ export async function callOpenChamberTool(ctx, toolName, input) {
         metadata: {
           openchamber: {
             schemaVersion: 1,
-            action: input?.mode || toolName,
+            action: input?.action || toolName,
             ok: false,
             error: {
               message: sanitizeError(`OpenChamber returned invalid response status: ${response.status}`),

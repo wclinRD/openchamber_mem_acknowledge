@@ -3,8 +3,18 @@ import { callOpenChamberTool } from "./openchamberClient.js";
 import { startLocalServer } from "./server.js";
 import { validateBackupPayload, validateConflictMemory, validateConflictKnowledge, serializeBackup } from "./backup.js";
 import { readFile, writeFile } from "fs/promises";
-import { resolve, normalize, relative } from "path";
+import { resolve, isAbsolute } from "path";
 import { existsSync } from "fs";
+
+const normalizeAllowedPath = (inputPath) => {
+  const raw = inputPath || "";
+  if (typeof raw !== "string" || raw.includes("..")) return null;
+  const resolved = resolve(raw);
+  if (isAbsolute(resolved) && !resolved.startsWith("/Users/wclin/")) {
+    return null;
+  }
+  return resolved;
+};
 
 const modeList = [
   "list-memory",
@@ -147,7 +157,16 @@ async function makeMemoryBridgeMode(ctx, memoryBridgeInput) {
           },
         };
       }
-      await writeFile(memoryBridgeInput.path, JSON.stringify(backup, null, 2), "utf8");
+      const allowedPath = normalizeAllowedPath(memoryBridgeInput.path);
+      if (!allowedPath) {
+        return {
+          content: JSON.stringify({ ok: false, error: { message: "Invalid path" } }),
+          metadata: {
+            openchamber: { schemaVersion: 1, action: "export-backup", ok: false },
+          },
+        };
+      }
+      await writeFile(allowedPath, JSON.stringify(backup, null, 2), "utf8");
       return {
         content: JSON.stringify({ ok: true, writtenTo: memoryBridgeInput.path, backup }),
         metadata: {
@@ -156,7 +175,16 @@ async function makeMemoryBridgeMode(ctx, memoryBridgeInput) {
       };
     }
     case "import-backup": {
-      const raw = await readFile(memoryBridgeInput.path, "utf8");
+      const allowedPath = normalizeAllowedPath(memoryBridgeInput.path);
+      if (!allowedPath) {
+        return {
+          content: JSON.stringify({ ok: false, error: { message: "Invalid path" } }),
+          metadata: {
+            openchamber: { schemaVersion: 1, action: "import-backup", ok: false },
+          },
+        };
+      }
+      const raw = await readFile(allowedPath, "utf8");
       const backup = parseResponseText(raw);
       const validErrors = validateBackupPayload(backup);
       if (validErrors.length > 0) {
