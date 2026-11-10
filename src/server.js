@@ -614,9 +614,9 @@ export function startLocalServer(port) {
             handleApiError(res, validErrors.join('; '), 400);
             return;
           }
-          await writeFile(path, JSON.stringify(backup, null, 2), 'utf8');
+          await writeFile(allowedPath, JSON.stringify(backup, null, 2), 'utf8');
           res.writeHead(200, { 'content-type': 'application/json' });
-          res.end(JSON.stringify({ ok: true, writtenTo: path }));
+          res.end(JSON.stringify({ ok: true, writtenTo: allowedPath }));
         } catch (err) {
           handleApiError(res, `export failed: ${err.message}`, 500);
         }
