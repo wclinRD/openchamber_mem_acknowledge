@@ -1,8 +1,11 @@
 import http from "http";
-import { readFile } from "fs/promises";
-import { resolve } from "path";
+import { readFile, writeFile } from "fs/promises";
 import { callOpenChamberTool } from "./openchamberClient.js";
-import { validateBackupPayload } from "./backup.js";
+import { validateBackupPayload, validateConflictMemory, validateConflictKnowledge } from "./backup.js";
+
+process.on("unhandledRejection", (err) => {
+  console.error(`[openchamber-memory-bridge] Unhandled rejection:`, err);
+});
 
 const uiHTML = `<!DOCTYPE html>
 <html lang="zh-TW">
@@ -416,28 +419,41 @@ export function startLocalServer(port) {
       const [api, section, id] = path.split('/').filter(Boolean);
       const params = url.searchParams;
 
-      if (api === 'memories') {
+      const handleApiError = (res, message, status = 400) => {
+        res.writeHead(status, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: message }));
+      };
+
+      const handleMemoryRequest = async (req, res, { section, id, params }) => {
         if (section === undefined) {
           const scope = params.get('scope') || undefined;
           const search = params.get('search') || undefined;
           const limit = params.get('limit') ? Number(params.get('limit')) : undefined;
-          const result = await callOpenChamberTool(
-            { sessionID: 'webui-session', id: 'webui-call', signal: null },
-            'openchamber_memory',
-            { action: 'memory.list', parameters: { scope, limit } }
-          );
-          res.writeHead(200, { 'content-type': 'application/json' });
-          res.end(result.content);
-        } else if (id) {
-          const result = await callOpenChamberTool(
+          try {
+            const result = await callOpenChamberTool(
+              { sessionID: 'webui-session', id: 'webui-call', signal: null },
+              'openchamber_memory',
+              { action: 'memory.list', parameters: { scope, limit } }
+            );
+            res.writeHead(200, { 'content-type': 'application/json' });
+            res.end(result.content);
+          } catch (err) {
+            handleApiError(res, `memory.list failed: ${err.message}`, 500);
+          }
+          return;
+        }
+        if (id) {
+          const readResult = await callOpenChamberTool(
             { sessionID: 'webui-session', id: 'webui-call', signal: null },
             'openchamber_memory',
             { action: 'memory.read', parameters: { memoryId: id } }
           );
           if (req.method === 'GET') {
             res.writeHead(200, { 'content-type': 'application/json' });
-            res.end(result.content);
-          } else if (req.method === 'DELETE') {
+            res.end(readResult.content);
+            return;
+          }
+          if (req.method === 'DELETE') {
             const deleteResult = await callOpenChamberTool(
               { sessionID: 'webui-session', id: 'webui-call', signal: null },
               'openchamber_memory',
@@ -445,140 +461,184 @@ export function startLocalServer(port) {
             );
             res.writeHead(200, { 'content-type': 'application/json' });
             res.end(deleteResult.content);
-          } else {
-            res.writeHead(405, { 'content-type': 'application/json' });
-            res.end(JSON.stringify({ ok: false, error: 'Method not allowed' }));
+            return;
           }
-        } else if (req.method === 'POST') {
-          const body = await new Promise((resolve) => {
-            let data = '';
-            req.on('data', (chunk) => { data += chunk; });
-            req.on('end', () => resolve(data));
-          });
-          const data = JSON.parse(body);
-          const result = await callOpenChamberTool(
-            { sessionID: 'webui-session', id: 'webui-call', signal: null },
-            'openchamber_memory',
-            { action: 'memory.save', parameters: { title: data.title, body: data.body, type: data.type, scope: data.scope } }
-          );
-          res.writeHead(200, { 'content-type': 'application/json' });
-          res.end(result.content);
         }
-      } else if (api === 'knowledge') {
-        if (section === undefined) {
-          const result = await callOpenChamberTool(
-            { sessionID: 'webui-session', id: 'webui-call', signal: null },
-            'openchamber_knowledge',
-            { action: 'knowledge.list', parameters: {} }
-          );
-          res.writeHead(200, { 'content-type': 'application/json' });
-          res.end(result.content);
-        } else if (id) {
-          if (req.method === 'GET') {
+        if (req.method === 'POST') {
+          try {
+            const body = await new Promise((resolve) => {
+              let data = '';
+              req.on('data', (chunk) => { data += chunk; });
+              req.on('end', () => resolve(data));
+            });
+            const data = JSON.parse(body);
             const result = await callOpenChamberTool(
               { sessionID: 'webui-session', id: 'webui-call', signal: null },
-              'openchamber_knowledge',
-              { action: 'knowledge.show', parameters: { kind: 'note', id } }
+              'openchamber_memory',
+              { action: 'memory.save', parameters: { title: data.title, body: data.body, type: data.type, scope: data.scope } }
             );
             res.writeHead(200, { 'content-type': 'application/json' });
             res.end(result.content);
-          } else if (req.method === 'DELETE') {
+            return;
+          } catch (err) {
+            handleApiError(res, `memory.save failed: ${err.message}`, 500);
+            return;
+          }
+        }
+        res.writeHead(405, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: 'Method not allowed' }));
+      };
+
+      const handleKnowledgeRequest = async (req, res, { section, id, params }) => {
+        if (section === undefined) {
+          try {
+            const result = await callOpenChamberTool(
+              { sessionID: 'webui-session', id: 'webui-call', signal: null },
+              'openchamber_knowledge',
+              { action: 'knowledge.list', parameters: {} }
+            );
+            res.writeHead(200, { 'content-type': 'application/json' });
+            res.end(result.content);
+            return;
+          } catch (err) {
+            handleApiError(res, `knowledge.list failed: ${err.message}`, 500);
+            return;
+          }
+        }
+        if (id) {
+          if (req.method === 'GET') {
+            try {
+              const result = await callOpenChamberTool(
+                { sessionID: 'webui-session', id: 'webui-call', signal: null },
+                'openchamber_knowledge',
+                { action: 'knowledge.show', parameters: { kind: 'note', id } }
+              );
+              res.writeHead(200, { 'content-type': 'application/json' });
+              res.end(result.content);
+              return;
+            } catch (err) {
+              handleApiError(res, `knowledge.show failed: ${err.message}`, 500);
+              return;
+            }
+          }
+          if (req.method === 'DELETE') {
             let deleteBody = '';
             for await (const chunk of req) deleteBody += chunk;
             let deleteParams = { kind: 'note' };
             try { deleteParams = JSON.parse(deleteBody || '{}'); } catch {}
-            const deleteResult = await callOpenChamberTool(
-              { sessionID: 'webui-session', id: 'webui-call', signal: null },
-              'openchamber_knowledge',
-              { action: 'knowledge.delete', parameters: { kind: deleteParams.kind || 'note', id } }
-            );
-            res.writeHead(200, { 'content-type': 'application/json' });
-            res.end(deleteResult.content);
-          } else if (req.method === 'POST') {
-            let body = '';
-            for await (const chunk of req) body += chunk;
-            const data = JSON.parse(body);
-            const result = await callOpenChamberTool(
-              { sessionID: 'webui-session', id: 'webui-call', signal: null },
-              'openchamber_knowledge',
-              { action: 'knowledge.save', parameters: { kind: data.kind || 'note', body: data.body, id, title: data.title } }
-            );
-            res.writeHead(200, { 'content-type': 'application/json' });
-            res.end(result.content);
-          } else {
-            res.writeHead(405, { 'content-type': 'application/json' });
-            res.end(JSON.stringify({ ok: false, error: 'Method not allowed' }));
+            try {
+              const deleteResult = await callOpenChamberTool(
+                { sessionID: 'webui-session', id: 'webui-call', signal: null },
+                'openchamber_knowledge',
+                { action: 'knowledge.delete', parameters: { kind: deleteParams.kind || 'note', id } }
+              );
+              res.writeHead(200, { 'content-type': 'application/json' });
+              res.end(deleteResult.content);
+              return;
+            } catch (err) {
+              handleApiError(res, `knowledge.delete failed: ${err.message}`, 500);
+              return;
+            }
+          }
+          if (req.method === 'POST') {
+            try {
+              let body = '';
+              for await (const chunk of req) body += chunk;
+              const data = JSON.parse(body);
+              const result = await callOpenChamberTool(
+                { sessionID: 'webui-session', id: 'webui-call', signal: null },
+                'openchamber_knowledge',
+                { action: 'knowledge.save', parameters: { kind: data.kind || 'note', body: data.body, id, title: data.title } }
+              );
+              res.writeHead(200, { 'content-type': 'application/json' });
+              res.end(result.content);
+              return;
+            } catch (err) {
+              handleApiError(res, `knowledge.save failed: ${err.message}`, 500);
+              return;
+            }
           }
         }
-      } else if (api === 'export') {
+        res.writeHead(405, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: 'Method not allowed' }));
+      };
+
+      const handleExportRequest = async (req, res, { params }) => {
         const path = params.get('path');
         if (!path) {
-          res.writeHead(400, { 'content-type': 'application/json' });
-          res.end(JSON.stringify({ ok: false, error: 'Missing path' }));
+          handleApiError(res, 'Missing path', 400);
           return;
         }
-        const memoryResult = await callOpenChamberTool(
-          { sessionID: 'webui-session', id: 'webui-call', signal: null },
-          'openchamber_memory',
-          { action: 'memory.list', parameters: { scope: params.get('scope') || undefined } }
-        );
-        const knowledgeResult = await callOpenChamberTool(
-          { sessionID: 'webui-session', id: 'webui-call', signal: null },
-          'openchamber_knowledge',
-          { action: 'knowledge.list', parameters: {} }
-        );
-        const memoryList = parseJSON(memoryResult.content);
-        const knowledgeList = parseJSON(knowledgeResult.content);
-        const backup = {
-          format: 'openchamber-memory-bridge-backup',
-          version: 1,
-          exportedAt: new Date().toISOString(),
-          memories: memoryList.map((m) => ({ title: m.title, body: m.body, type: m.type, scope: m.scope, memoryId: m.memoryId || '' })),
-          knowledge: knowledgeList.map((k) => ({ kind: k.kind, body: k.body, id: k.id, completed: k.completed ?? false, planId: k.planId, dependsOn: k.dependsOn || [] })),
-        };
-        const validErrors = validateBackupPayload(backup);
-        if (validErrors.length > 0) {
-          res.writeHead(400, { 'content-type': 'application/json' });
-          res.end(JSON.stringify({ ok: false, errors: validErrors }));
-          return;
-        }
-        await writeFile(path, JSON.stringify(backup, null, 2), 'utf8');
-        res.writeHead(200, { 'content-type': 'application/json' });
-        res.end(JSON.stringify({ ok: true, writtenTo: path }));
-      } else if (api === 'import') {
-        const path = params.get('path');
-        const policy = params.get('importConflictPolicy') || 'upsert';
-        if (!path) {
-          res.writeHead(400, { 'content-type': 'application/json' });
-          res.end(JSON.stringify({ ok: false, error: 'Missing path' }));
-          return;
-        }
-        let body = '';
-        for await (const chunk of req) body += chunk;
-        const backup = parseJSON(body);
-        const validErrors = validateBackupPayload(backup);
-        if (validErrors.length > 0) {
-          res.writeHead(400, { 'content-type': 'application/json' });
-          res.end(JSON.stringify({ ok: false, errors: validErrors }));
-          return;
-        }
-        const [existingMemoryResult, existingKnowledgeResult] = await Promise.all([
-          callOpenChamberTool(
+        try {
+          const memoryResult = await callOpenChamberTool(
             { sessionID: 'webui-session', id: 'webui-call', signal: null },
             'openchamber_memory',
-            { action: 'memory.list', parameters: {} }
-          ),
-          callOpenChamberTool(
+            { action: 'memory.list', parameters: { scope: params.get('scope') || undefined } }
+          );
+          const knowledgeResult = await callOpenChamberTool(
             { sessionID: 'webui-session', id: 'webui-call', signal: null },
             'openchamber_knowledge',
             { action: 'knowledge.list', parameters: {} }
-          ),
-        ]);
-        const existingMemories = parseJSON(existingMemoryResult.content);
-        const existingKnowledge = parseJSON(existingKnowledgeResult.content);
-        const memoryConflictErrors = []; // simplified validation in route
-        const knowledgeConflictErrors = []; // simplified in route
-        if (validErrors.length === 0) {
+          );
+          const memoryList = parseJSON(memoryResult.content);
+          const knowledgeList = parseJSON(knowledgeResult.content);
+          const backup = {
+            format: 'openchamber-memory-bridge-backup',
+            version: 1,
+            exportedAt: new Date().toISOString(),
+            memories: memoryList.map((m) => ({ title: m.title, body: m.body, type: m.type, scope: m.scope, memoryId: m.memoryId || '' })),
+            knowledge: knowledgeList.map((k) => ({ kind: k.kind, body: k.body, id: k.id, completed: k.completed ?? false, planId: k.planId, dependsOn: k.dependsOn || [] })),
+          };
+          const validErrors = validateBackupPayload(backup);
+          if (validErrors.length > 0) {
+            handleApiError(res, validErrors.join('; '), 400);
+            return;
+          }
+          await writeFile(path, JSON.stringify(backup, null, 2), 'utf8');
+          res.writeHead(200, { 'content-type': 'application/json' });
+          res.end(JSON.stringify({ ok: true, writtenTo: path }));
+        } catch (err) {
+          handleApiError(res, `export failed: ${err.message}`, 500);
+        }
+      };
+
+      const handleImportRequest = async (req, res, { params }) => {
+        const path = params.get('path');
+        const policy = params.get('importConflictPolicy') || 'upsert';
+        if (!path) {
+          handleApiError(res, 'Missing path', 400);
+          return;
+        }
+        try {
+          let body = '';
+          for await (const chunk of req) body += chunk;
+          const backup = parseJSON(body);
+          const validErrors = validateBackupPayload(backup);
+          if (validErrors.length > 0) {
+            handleApiError(res, validErrors.join('; '), 400);
+            return;
+          }
+          const [existingMemoryResult, existingKnowledgeResult] = await Promise.all([
+            callOpenChamberTool(
+              { sessionID: 'webui-session', id: 'webui-call', signal: null },
+              'openchamber_memory',
+              { action: 'memory.list', parameters: {} }
+            ),
+            callOpenChamberTool(
+              { sessionID: 'webui-session', id: 'webui-call', signal: null },
+              'openchamber_knowledge',
+              { action: 'knowledge.list', parameters: {} }
+            ),
+          ]);
+          const existingMemories = parseJSON(existingMemoryResult.content);
+          const existingKnowledge = parseJSON(existingKnowledgeResult.content);
+          const memoryConflictErrors = validateConflictMemory(existingMemories, backup.memories);
+          const knowledgeConflictErrors = validateConflictKnowledge(existingKnowledge, backup.knowledge, policy);
+          const allErrors = [...memoryConflictErrors, ...knowledgeConflictErrors];
+          if (allErrors.length > 0) {
+            handleApiError(res, allErrors.join('; '), 400);
+            return;
+          }
           const importPromises = [
             ...backup.memories.map((m) =>
               callOpenChamberTool(
@@ -602,10 +662,26 @@ export function startLocalServer(port) {
           });
           res.writeHead(200, { 'content-type': 'application/json' });
           res.end(JSON.stringify({ ok: failed.length === 0, importedMemories: backup.memories.length, importedKnowledge: backup.knowledge.length, failures: failed.length }));
+        } catch (err) {
+          handleApiError(res, `import failed: ${err.message}`, 500);
         }
-      } else {
-        res.writeHead(404, { 'content-type': 'application/json' });
-        res.end(JSON.stringify({ ok: false, error: 'Not found' }));
+      };
+
+      try {
+        if (api === 'memories') {
+          await handleMemoryRequest(req, res, { section, id, params });
+        } else if (api === 'knowledge') {
+          await handleKnowledgeRequest(req, res, { section, id, params });
+        } else if (api === 'export') {
+          await handleExportRequest(req, res, { params });
+        } else if (api === 'import') {
+          await handleImportRequest(req, res, { params });
+        } else {
+          res.writeHead(404, { 'content-type': 'application/json' });
+          res.end(JSON.stringify({ ok: false, error: 'Not found' }));
+        }
+      } catch (err) {
+        handleApiError(res, `api handler failed: ${err.message}`, 500);
       }
     } else {
       res.writeHead(404, { 'content-type': 'application/json' });
