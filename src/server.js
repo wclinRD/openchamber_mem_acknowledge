@@ -1,6 +1,6 @@
 import http from "http";
 import { readFile, writeFile } from "fs/promises";
-import { callOpenChamberTool } from "./openchamberClient.js";
+import dataStore from "./dataStore.js";
 import { validateBackupPayload, validateConflictMemory, validateConflictKnowledge } from "./backup.js";
 import { resolve, isAbsolute } from "path";
 
@@ -445,37 +445,30 @@ export function startLocalServer(port) {
           const search = params.get('search') || undefined;
           const limit = params.get('limit') ? Number(params.get('limit')) : undefined;
           try {
-            const result = await callOpenChamberTool(
-              { sessionID: 'webui-session', id: 'webui-call', signal: null },
-              'openchamber_memory',
-              { action: 'memory.list', parameters: { scope, limit } }
-            );
+            const result = await dataStore.listMemories({ sessionID: 'webui-session', id: 'webui-call' }, { scope, limit, query: search });
             res.writeHead(200, { 'content-type': 'application/json' });
-            res.end(result.content);
+            res.end(JSON.stringify(result));
           } catch (err) {
             handleApiError(res, `memory.list failed: ${err.message}`, 500);
           }
           return;
         }
         if (id) {
-          const readResult = await callOpenChamberTool(
-            { sessionID: 'webui-session', id: 'webui-call', signal: null },
-            'openchamber_memory',
-            { action: 'memory.read', parameters: { memoryId: id } }
-          );
           if (req.method === 'GET') {
-            res.writeHead(200, { 'content-type': 'application/json' });
-            res.end(readResult.content);
-            return;
+            try {
+              const result = await dataStore.readMemory({ sessionID: 'webui-session', id: 'webui-call' }, { memoryId: id });
+              res.writeHead(200, { 'content-type': 'application/json' });
+              res.end(result ? JSON.stringify(result) : JSON.stringify({ ok: false, error: 'Memory not found' }));
+              return;
+            } catch (err) {
+              handleApiError(res, `memory.read failed: ${err.message}`, 500);
+              return;
+            }
           }
           if (req.method === 'DELETE') {
-            const deleteResult = await callOpenChamberTool(
-              { sessionID: 'webui-session', id: 'webui-call', signal: null },
-              'openchamber_memory',
-              { action: 'memory.delete', parameters: { memoryId: id } }
-            );
+            const deleteResult = await dataStore.deleteMemory({ sessionID: 'webui-session', id: 'webui-call' }, { memoryId: id });
             res.writeHead(200, { 'content-type': 'application/json' });
-            res.end(deleteResult.content);
+            res.end(JSON.stringify(deleteResult));
             return;
           }
         }
@@ -487,13 +480,9 @@ export function startLocalServer(port) {
               req.on('end', () => resolve(data));
             });
             const data = JSON.parse(body);
-            const result = await callOpenChamberTool(
-              { sessionID: 'webui-session', id: 'webui-call', signal: null },
-              'openchamber_memory',
-              { action: 'memory.save', parameters: { title: data.title, body: data.body, type: data.type, scope: data.scope } }
-            );
+            const result = await dataStore.saveMemory({ sessionID: 'webui-session', id: 'webui-call' }, { title: data.title, body: data.body, type: data.type, scope: data.scope });
             res.writeHead(200, { 'content-type': 'application/json' });
-            res.end(result.content);
+            res.end(JSON.stringify(result));
             return;
           } catch (err) {
             handleApiError(res, `memory.save failed: ${err.message}`, 500);
@@ -507,13 +496,9 @@ export function startLocalServer(port) {
       const handleKnowledgeRequest = async (req, res, { section, id, params }) => {
         if (section === undefined) {
           try {
-            const result = await callOpenChamberTool(
-              { sessionID: 'webui-session', id: 'webui-call', signal: null },
-              'openchamber_knowledge',
-              { action: 'knowledge.list', parameters: {} }
-            );
+            const result = await dataStore.listKnowledge({ sessionID: 'webui-session', id: 'webui-call' }, { limit: params.get('limit') ? Number(params.get('limit')) : undefined });
             res.writeHead(200, { 'content-type': 'application/json' });
-            res.end(result.content);
+            res.end(JSON.stringify(result));
             return;
           } catch (err) {
             handleApiError(res, `knowledge.list failed: ${err.message}`, 500);
@@ -523,16 +508,12 @@ export function startLocalServer(port) {
         if (id) {
           if (req.method === 'GET') {
             try {
-              const result = await callOpenChamberTool(
-                { sessionID: 'webui-session', id: 'webui-call', signal: null },
-                'openchamber_knowledge',
-                { action: 'knowledge.show', parameters: { kind: 'note', id } }
-              );
+              const result = await dataStore.readKnowledge({ sessionID: 'webui-session', id: 'webui-call' }, { id });
               res.writeHead(200, { 'content-type': 'application/json' });
-              res.end(result.content);
+              res.end(result ? JSON.stringify(result) : JSON.stringify({ ok: false, error: 'Knowledge not found' }));
               return;
             } catch (err) {
-              handleApiError(res, `knowledge.show failed: ${err.message}`, 500);
+              handleApiError(res, `knowledge.get failed: ${err.message}`, 500);
               return;
             }
           }
@@ -542,13 +523,9 @@ export function startLocalServer(port) {
             let deleteParams = { kind: 'note' };
             try { deleteParams = JSON.parse(deleteBody || '{}'); } catch {}
             try {
-              const deleteResult = await callOpenChamberTool(
-                { sessionID: 'webui-session', id: 'webui-call', signal: null },
-                'openchamber_knowledge',
-                { action: 'knowledge.delete', parameters: { kind: deleteParams.kind || 'note', id } }
-              );
+              const deleteResult = await dataStore.deleteKnowledge({ sessionID: 'webui-session', id: 'webui-call' }, { kind: deleteParams.kind || 'note', id });
               res.writeHead(200, { 'content-type': 'application/json' });
-              res.end(deleteResult.content);
+              res.end(JSON.stringify(deleteResult));
               return;
             } catch (err) {
               handleApiError(res, `knowledge.delete failed: ${err.message}`, 500);
@@ -560,13 +537,9 @@ export function startLocalServer(port) {
               let body = '';
               for await (const chunk of req) body += chunk;
               const data = JSON.parse(body);
-              const result = await callOpenChamberTool(
-                { sessionID: 'webui-session', id: 'webui-call', signal: null },
-                'openchamber_knowledge',
-                { action: 'knowledge.save', parameters: { kind: data.kind || 'note', body: data.body, id, title: data.title } }
-              );
+              const result = await dataStore.saveKnowledge({ sessionID: 'webui-session', id: 'webui-call' }, { kind: data.kind || 'note', body: data.body, id, title: data.title });
               res.writeHead(200, { 'content-type': 'application/json' });
-              res.end(result.content);
+              res.end(JSON.stringify(result));
               return;
             } catch (err) {
               handleApiError(res, `knowledge.save failed: ${err.message}`, 500);
@@ -590,25 +563,7 @@ export function startLocalServer(port) {
           return;
         }
         try {
-          const memoryResult = await callOpenChamberTool(
-            { sessionID: 'webui-session', id: 'webui-call', signal: null },
-            'openchamber_memory',
-            { action: 'memory.list', parameters: { scope: params.get('scope') || undefined } }
-          );
-          const knowledgeResult = await callOpenChamberTool(
-            { sessionID: 'webui-session', id: 'webui-call', signal: null },
-            'openchamber_knowledge',
-            { action: 'knowledge.list', parameters: {} }
-          );
-          const memoryList = parseJSON(memoryResult.content);
-          const knowledgeList = parseJSON(knowledgeResult.content);
-          const backup = {
-            format: 'openchamber-memory-bridge-backup',
-            version: 1,
-            exportedAt: new Date().toISOString(),
-            memories: memoryList.map((m) => ({ title: m.title, body: m.body, type: m.type, scope: m.scope, memoryId: m.memoryId || '' })),
-            knowledge: knowledgeList.map((k) => ({ kind: k.kind, body: k.body, id: k.id, completed: k.completed ?? false, planId: k.planId, dependsOn: k.dependsOn || [] })),
-          };
+          const backup = await dataStore.exportBackup({ sessionID: 'webui-session', id: 'webui-call' });
           const validErrors = validateBackupPayload(backup);
           if (validErrors.length > 0) {
             handleApiError(res, validErrors.join('; '), 400);
@@ -638,50 +593,9 @@ export function startLocalServer(port) {
             handleApiError(res, validErrors.join('; '), 400);
             return;
           }
-          const [existingMemoryResult, existingKnowledgeResult] = await Promise.all([
-            callOpenChamberTool(
-              { sessionID: 'webui-session', id: 'webui-call', signal: null },
-              'openchamber_memory',
-              { action: 'memory.list', parameters: {} }
-            ),
-            callOpenChamberTool(
-              { sessionID: 'webui-session', id: 'webui-call', signal: null },
-              'openchamber_knowledge',
-              { action: 'knowledge.list', parameters: {} }
-            ),
-          ]);
-          const existingMemories = parseJSON(existingMemoryResult.content);
-          const existingKnowledge = parseJSON(existingKnowledgeResult.content);
-          const memoryConflictErrors = validateConflictMemory(existingMemories, backup.memories);
-          const knowledgeConflictErrors = validateConflictKnowledge(existingKnowledge, backup.knowledge, policy);
-          const allErrors = [...memoryConflictErrors, ...knowledgeConflictErrors];
-          if (allErrors.length > 0) {
-            handleApiError(res, allErrors.join('; '), 400);
-            return;
-          }
-          const importPromises = [
-            ...backup.memories.map((m) =>
-              callOpenChamberTool(
-                { sessionID: 'webui-session', id: 'webui-call', signal: null },
-                'openchamber_memory',
-                { action: 'memory.save', parameters: { title: m.title, body: m.body, type: m.type, scope: m.scope, memoryId: m.memoryId } }
-              )
-            ),
-            ...backup.knowledge.map((k) =>
-              callOpenChamberTool(
-                { sessionID: 'webui-session', id: 'webui-call', signal: null },
-                'openchamber_knowledge',
-                { action: 'knowledge.save', parameters: { kind: k.kind, body: k.body, id: k.id, completed: k.completed, planId: k.planId, dependsOn: k.dependsOn } }
-              )
-            ),
-          ];
-          const results = await Promise.all(importPromises);
-          const failed = results.filter((r) => {
-            const c = r.content || '';
-            return c.includes('"ok":false') || c.includes('error');
-          });
+          await dataStore.importBackup({ sessionID: 'webui-session', id: 'webui-call' }, backup, policy);
           res.writeHead(200, { 'content-type': 'application/json' });
-          res.end(JSON.stringify({ ok: failed.length === 0, importedMemories: backup.memories.length, importedKnowledge: backup.knowledge.length, failures: failed.length }));
+          res.end(JSON.stringify({ ok: true, importedMemories: backup.memories?.length || 0, importedKnowledge: backup.knowledge?.length || 0 }));
         } catch (err) {
           handleApiError(res, `import failed: ${err.message}`, 500);
         }

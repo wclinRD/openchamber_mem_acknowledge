@@ -1,7 +1,7 @@
 {
   "name": "opencode-openchamber-memory-bridge",
   "version": "0.1.0",
-  "description": "OpenCode plugin bridging memoryBridge with OpenChamber memory and acknowledge (knowledge) tools, with local web UI and import/export backup",
+  "description": "OpenCode plugin with local SQLite database for self-contained memory and acknowledge storage, plus web UI and import/export backup",
   "main": "index.js",
   "type": "module",
   "scripts": {

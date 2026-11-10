@@ -1,17 +1,18 @@
 # opencode-openchamber-memory-bridge
 
-An OpenCode v2 plugin that bridges the OpenCode agent with OpenChamber's built-in memory and knowledge tools. It provides a unified interface to read, write, search, export, and import OpenChamber `memory` and `acknowledge` (project knowledge) data, plus a local Web UI for managing stored memories and acknowledgments.
+An OpenCode v2 plugin with **self-contained local SQLite storage** for memory and acknowledgment (knowledge) data. It no longer depends on OpenChamber external tools, allowing the LLM to store and retrieve data locally via its own database. A local Web UI is provided for managing stored memories and acknowledgments.
 
 ## Features
 
 - **OpenCode v2 plugin** using `@opencode/plugin` 2.2.0 and the official `ctx.tool.transform(async (editor) => { await editor.add(...) })` registration pattern.
+- **Local SQLite database** for memory and acknowledgment records, backed by Node.js `node:sqlite` (`DatabaseSync`).
 - **Unified `memoryBridge` tool** with all required modes:
   - Memory: `list-memory`, `read-memory`, `save-memory`, `delete-memory`, `search-memory`
   - Acknowledge (knowledge): `list-knowledge`, `read-knowledge`, `save-knowledge`, `delete-knowledge`, `search-knowledge`
   - Backup: `export-backup`, `import-backup`
 - **Local Web UI** served at `http://127.0.0.1:4800` by default, with separate panels for Memories and Acknowledge, search/filter, detail view, and Export/Import buttons.
-- **Backup import/export** with JSON format `openchamber-memory-bridge-backup` version 1, validation, conflict policies (`upsert` | `skip` | `error`), and path traversal protection for file operations.
-- **No mock or hardcoded data**: all interactions go through actual OpenChamber tools via `OPENCHAMBER_AGENT_TOOL_URL` and `OPENCHAMBER_AGENT_TOOL_TOKEN`.
+- **Backup import/export** with JSON format `opencode-local-memory-bridge-backup` version 1, validation, conflict policies (`upsert` | `skip` | `error`), and path traversal protection for file operations.
+- **No mocked or hardcoded data**: all interactions go through the local SQLite database in the plugin's data directory (`~/.local/share/opencode/plugins/opencode-openchamber-memory-bridge/data.db`).
 
 ## Architecture
 
@@ -20,43 +21,40 @@ agent session
     │
     ▼
 Plugin `memoryBridge` tool (V2 JSON Schema)
-    │  ──► read memory/acknowledge via openchamber_memory/openchamber_knowledge tools
-    │  ──► write/update/delete memory/acknowledge
     │
     ▼
-OpenChamber agent-tool backend (environment: OPENCHAMBER_AGENT_TOOL_URL/TOKEN)
+Local SQLite database
     │
-    ▼
-OpenChamber storage backend
+    ──► read/write memory/acknowledge locally
+    ──► export/import backup JSON
 ```
 
-The local Web UI and backup endpoints route through the same `openchamber_memory` / `openchamber_knowledge` tools.
+The local Web UI and backup endpoints route through the same SQLite database.
 
 ## Requirements
 
-- Node.js 18 or higher
+- Node.js 20 or higher (uses `node:sqlite` DatabaseSync)
 - OpenCode 2.x
-- Environment variables:
-  - `OPENCHAMBER_AGENT_TOOL_URL`: HTTPS URL to the OpenChamber agent-tool endpoint
-  - `OPENCHAMBER_AGENT_TOOL_TOKEN`: Bearer token for the endpoint
 
-If these are missing, the plugin remains registered but reports `OPENCHAMBER_MANAGED_TOOL_UNAVAILABLE` for actual tool calls.
+No OpenChamber environment variables are required.
 
 ## Installation
 
 1. Initialize the plugin as an OpenCode plugin (typical place: `~/.config/opencode/plugins/opencode-openchamber-memory-bridge`).
 2. Ensure `package.json` has `"type": "module"` and depends on `"@opencode/plugin": "2.2.0"`.
-3. Copy the source code (`src/plugin.js`, `src/openchamberClient.js`, `src/backup.js`, `src/server.js`, and the plugin entry `index.js`) into the plugin directory.
+3. Copy the source code (`src/plugin.js`, `src/openchamberClient.js`, `src/backup.js`, `src/server.js`, `src/dataStore.js`, and the plugin entry `index.js`) into the plugin directory.
 4. Run `npm install` in the plugin directory to install `@opencode/plugin`.
+
+Data is automatically stored in the plugin's data directory; no configuration is needed.
 
 ## Usage
 
 ### In an OpenCode session
 
-Ask the agent to use `memoryBridge` to manage memory or acknowledge:
+Ask the agent to use `memoryBridge` to manage local memory or acknowledgment:
 
 ```
-List my openchamber memories with scope 'project'.
+List my local memories with scope 'project'.
 Read memory with ID 'm-123'.
 Save a memory with title 'Project constraint' and body 'Needs to be implemented'.
 List acknowledge items related to plan 'plan-456'.
@@ -79,11 +77,17 @@ Open `http://127.0.0.1:4800` to view the local UI. The UI:
 - Provides Export Backup and Import Backup buttons.
 - Filters acknowledge items by knowledge kind `note` with title prefix.
 
+## Storage Location
+
+The plugin creates and uses a local SQLite database file:
+
+- macOS/Linux: `~/.local/share/opencode/plugins/opencode-openchamber-memory-bridge/data.db`
+- Windows: `%APPDATA%\opencode\plugins\opencode-openchamber-memory-bridge\data.db`
+
 ## Security
 
 - The local Web UI server binds to `127.0.0.1:4800` by default and exposes no authentication. Do not expose this port externally without additional controls.
 - Backup file paths are validated to prevent traversal attacks and absolute-path escapes outside allowed roots.
-- The token is never logged or included in error messages or UI responses.
 
 ## Development
 
@@ -96,7 +100,7 @@ node --test
 Check syntax:
 
 ```bash
-node --check src/plugin.js src/server.js src/openchamberClient.js src/backup.js
+node --check src/plugin.js src/server.js src/dataStore.js src/backup.js
 ```
 
 ## License

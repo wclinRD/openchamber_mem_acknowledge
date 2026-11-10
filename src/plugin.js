@@ -1,6 +1,6 @@
 import { Plugin } from "@opencode/plugin";
-import { callOpenChamberTool } from "./openchamberClient.js";
 import { startLocalServer } from "./server.js";
+import dataStore from "./dataStore.js";
 import { validateBackupPayload, validateConflictMemory, validateConflictKnowledge, serializeBackup } from "./backup.js";
 import { readFile, writeFile } from "fs/promises";
 import { resolve, isAbsolute } from "path";
@@ -86,74 +86,103 @@ async function makeMemoryBridgeMode(ctx, memoryBridgeInput) {
   const { mode } = memoryBridgeInput;
   switch (mode) {
     case "list-memory":
-      return callOpenChamberTool(ctx, "openchamber_memory", {
-        action: "memory.list",
-        parameters: { scope: memoryBridgeInput.scope, limit: memoryBridgeInput.limit },
-      });
+      return {
+        content: JSON.stringify(await dataStore.listMemories(ctx, { scope: memoryBridgeInput.scope, limit: memoryBridgeInput.limit })),
+        metadata: {
+          source: "local-sqlite",
+          action: "list-memory",
+          ok: true,
+        },
+      };
     case "read-memory":
-      return callOpenChamberTool(ctx, "openchamber_memory", {
-        action: "memory.read",
-        parameters: memoryBridgeInput.memoryId ? { memoryId: memoryBridgeInput.memoryId } : { title: memoryBridgeInput.title },
-      });
+      return {
+        content: JSON.stringify(await dataStore.readMemory(ctx, { memoryId: memoryBridgeInput.memoryId, title: memoryBridgeInput.title })),
+        metadata: {
+          source: "local-sqlite",
+          action: "read-memory",
+          ok: true,
+        },
+      };
     case "save-memory":
-      return callOpenChamberTool(ctx, "openchamber_memory", {
-        action: "memory.save",
-        parameters: {
+      return {
+        content: JSON.stringify(await dataStore.saveMemory(ctx, {
           title: memoryBridgeInput.title,
           body: memoryBridgeInput.body,
           type: memoryBridgeInput.type,
           scope: memoryBridgeInput.scope,
           memoryId: memoryBridgeInput.memoryId,
+        })),
+        metadata: {
+          source: "local-sqlite",
+          action: "save-memory",
+          ok: true,
         },
-      });
+      };
     case "delete-memory":
-      return callOpenChamberTool(ctx, "openchamber_memory", {
-        action: "memory.delete",
-        parameters: { memoryId: memoryBridgeInput.memoryId, scope: memoryBridgeInput.scope },
-      });
+      return {
+        content: JSON.stringify(await dataStore.deleteMemory(ctx, { memoryId: memoryBridgeInput.memoryId })),
+        metadata: {
+          source: "local-sqlite",
+          action: "delete-memory",
+          ok: true,
+        },
+      };
     case "list-knowledge":
-      return callOpenChamberTool(ctx, "openchamber_knowledge", {
-        action: "knowledge.list",
-        parameters: { planId: memoryBridgeInput.planId, ready: memoryBridgeInput.ready, limit: memoryBridgeInput.limit },
-      });
+      return {
+        content: JSON.stringify(await dataStore.listKnowledge(ctx, { planId: memoryBridgeInput.planId, ready: memoryBridgeInput.ready, limit: memoryBridgeInput.limit })),
+        metadata: {
+          source: "local-sqlite",
+          action: "list-knowledge",
+          ok: true,
+        },
+      };
     case "read-knowledge":
-      return callOpenChamberTool(ctx, "openchamber_knowledge", {
-        action: "knowledge.show",
-        parameters: { kind: memoryBridgeInput.kind, id: memoryBridgeInput.id },
-      });
+      return {
+        content: JSON.stringify(await dataStore.readKnowledge(ctx, { id: memoryBridgeInput.id, title: memoryBridgeInput.title })),
+        metadata: {
+          source: "local-sqlite",
+          action: "read-knowledge",
+          ok: true,
+        },
+      };
     case "save-knowledge":
-      return callOpenChamberTool(ctx, "openchamber_knowledge", {
-        action: "knowledge.save",
-        parameters: {
+      return {
+        content: JSON.stringify(await dataStore.saveKnowledge(ctx, {
           kind: memoryBridgeInput.kind,
           body: memoryBridgeInput.body,
           id: memoryBridgeInput.id,
+          title: memoryBridgeInput.title,
           completed: memoryBridgeInput.completed,
           planId: memoryBridgeInput.planId,
           dependsOn: memoryBridgeInput.dependsOn,
           expected: memoryBridgeInput.expected,
           sessionId: memoryBridgeInput.sessionId,
+        })),
+        metadata: {
+          source: "local-sqlite",
+          action: "save-knowledge",
+          ok: true,
         },
-      });
+      };
     case "delete-knowledge":
-      return callOpenChamberTool(ctx, "openchamber_knowledge", {
-        action: "knowledge.delete",
-        parameters: { kind: memoryBridgeInput.kind, id: memoryBridgeInput.id },
-      });
+      return {
+        content: JSON.stringify(await dataStore.deleteKnowledge(ctx, { kind: memoryBridgeInput.kind, id: memoryBridgeInput.id })),
+        metadata: {
+          source: "local-sqlite",
+          action: "delete-knowledge",
+          ok: true,
+        },
+      };
     case "export-backup": {
-      const [memoryResult, knowledgeResult] = await Promise.all([
-        callOpenChamberTool(ctx, "openchamber_memory", { action: "memory.list", parameters: { scope: memoryBridgeInput.scope } }),
-        callOpenChamberTool(ctx, "openchamber_knowledge", { action: "knowledge.list", parameters: {} }),
-      ]);
-      const memoryList = parseResponseText(memoryResult.content);
-      const knowledgeList = parseResponseText(knowledgeResult.content);
-      const backup = serializeBackup(memoryList, knowledgeList);
+      const backup = await dataStore.exportBackup(ctx, {});
       const validErrors = validateBackupPayload(backup);
       if (validErrors.length > 0) {
         return {
           content: JSON.stringify({ ok: false, errors: validErrors }),
           metadata: {
-            openchamber: { schemaVersion: 1, action: "export-backup", ok: false },
+            source: "local-sqlite",
+            action: "export-backup",
+            ok: false,
           },
         };
       }
@@ -162,7 +191,9 @@ async function makeMemoryBridgeMode(ctx, memoryBridgeInput) {
         return {
           content: JSON.stringify({ ok: false, error: { message: "Invalid path" } }),
           metadata: {
-            openchamber: { schemaVersion: 1, action: "export-backup", ok: false },
+            source: "local-sqlite",
+            action: "export-backup",
+            ok: false,
           },
         };
       }
@@ -170,7 +201,9 @@ async function makeMemoryBridgeMode(ctx, memoryBridgeInput) {
       return {
         content: JSON.stringify({ ok: true, writtenTo: memoryBridgeInput.path, backup }),
         metadata: {
-          openchamber: { schemaVersion: 1, action: "export-backup", ok: true },
+          source: "local-sqlite",
+          action: "export-backup",
+          ok: true,
         },
       };
     }
@@ -180,7 +213,9 @@ async function makeMemoryBridgeMode(ctx, memoryBridgeInput) {
         return {
           content: JSON.stringify({ ok: false, error: { message: "Invalid path" } }),
           metadata: {
-            openchamber: { schemaVersion: 1, action: "import-backup", ok: false },
+            source: "local-sqlite",
+            action: "import-backup",
+            ok: false,
           },
         };
       }
@@ -191,73 +226,66 @@ async function makeMemoryBridgeMode(ctx, memoryBridgeInput) {
         return {
           content: JSON.stringify({ ok: false, errors: validErrors }),
           metadata: {
-            openchamber: { schemaVersion: 1, action: "import-backup", ok: false },
+            source: "local-sqlite",
+            action: "import-backup",
+            ok: false,
           },
         };
       }
       const conflictPolicy = memoryBridgeInput.importConflictPolicy || "upsert";
-      const [existingMemoryResult, existingKnowledgeResult] = await Promise.all([
-        callOpenChamberTool(ctx, "openchamber_memory", { action: "memory.list", parameters: {} }),
-        callOpenChamberTool(ctx, "openchamber_knowledge", { action: "knowledge.list", parameters: {} }),
-      ]);
-      const existingMemories = parseResponseText(existingMemoryResult.content);
-      const existingKnowledge = parseResponseText(existingKnowledgeResult.content);
-
-      const memoryConflictErrors = validateConflictMemory(existingMemories, backup.memories);
-      const knowledgeConflictErrors = validateConflictKnowledge(existingKnowledge, backup.knowledge, conflictPolicy);
-      const allErrors = [...memoryConflictErrors, ...knowledgeConflictErrors];
-      if (allErrors.length > 0) {
+      try {
+        await dataStore.importBackup(ctx, backup, conflictPolicy);
         return {
-          content: JSON.stringify({ ok: false, errors: allErrors }),
+          content: JSON.stringify({
+            ok: true,
+            importedMemories: backup.memories?.length || 0,
+            importedKnowledge: backup.knowledge?.length || 0,
+          }),
           metadata: {
-            openchamber: { schemaVersion: 1, action: "import-backup", ok: false },
+            source: "local-sqlite",
+            action: "import-backup",
+            ok: true,
+          },
+        };
+      } catch (err) {
+        return {
+          content: JSON.stringify({
+            ok: false,
+            error: { message: err.message },
+          }),
+          metadata: {
+            source: "local-sqlite",
+            action: "import-backup",
+            ok: false,
           },
         };
       }
-
-      const importPromises = [
-        ...backup.memories.map((m) =>
-          callOpenChamberTool(ctx, "openchamber_memory", {
-            action: "memory.save",
-            parameters: { title: m.title, body: m.body, type: m.type, scope: m.scope, memoryId: m.memoryId },
-          }),
-        ),
-        ...backup.knowledge.map((k) =>
-          callOpenChamberTool(ctx, "openchamber_knowledge", {
-            action: "knowledge.save",
-            parameters: { kind: k.kind, body: k.body, id: k.id, completed: k.completed, planId: k.planId, dependsOn: k.dependsOn },
-          }),
-        ),
-      ];
-      const results = await Promise.all(importPromises);
-      const failed = results.filter((r) => !r.content || r.content.includes('"ok":false') || r.content.includes('error'));
-      return {
-        content: JSON.stringify({
-          ok: failed.length === 0,
-          importedMemories: backup.memories.length,
-          importedKnowledge: backup.knowledge.length,
-          failures: failed.length,
-        }),
-        metadata: {
-          openchamber: { schemaVersion: 1, action: "import-backup", ok: failed.length === 0 },
-        },
-      };
     }
     case "search-memory":
-      return callOpenChamberTool(ctx, "openchamber_memory", {
-        action: "memory.search",
-        parameters: { query: memoryBridgeInput.query, scope: memoryBridgeInput.scope },
-      });
+      return {
+        content: JSON.stringify(await dataStore.listMemories(ctx, { query: memoryBridgeInput.query, scope: memoryBridgeInput.scope })),
+        metadata: {
+          source: "local-sqlite",
+          action: "search-memory",
+          ok: true,
+        },
+      };
     case "search-knowledge":
-      return callOpenChamberTool(ctx, "openchamber_knowledge", {
-        action: "knowledge.search",
-        parameters: { query: memoryBridgeInput.query, planId: memoryBridgeInput.planId },
-      });
+      return {
+        content: JSON.stringify(await dataStore.searchKnowledge(ctx, { query: memoryBridgeInput.query, planId: memoryBridgeInput.planId })),
+        metadata: {
+          source: "local-sqlite",
+          action: "search-knowledge",
+          ok: true,
+        },
+      };
     default:
       return {
         content: JSON.stringify({ ok: false, error: { message: "Unsupported mode" } }),
         metadata: {
-          openchamber: { schemaVersion: 1, action: mode, ok: false },
+          source: "local-sqlite",
+          action: mode,
+          ok: false,
         },
       };
   }
@@ -270,7 +298,7 @@ export default Plugin.define({
     const registration = await ctx.tool.transform(async (editor) => {
       await editor.add({
         name: "memoryBridge",
-        description: "Read/write OpenChamber memory and acknowledge (knowledge), export/import backups",
+        description: "Read/write local SQLite database for memory and acknowledge (knowledge), export/import backups",
         input: memoryBridgeSchema,
         execute: async (input, context) => {
           const result = await makeMemoryBridgeMode(context, input);
@@ -287,6 +315,7 @@ export default Plugin.define({
     return () => {
       registration.dispose?.();
       server.close();
+      dataStore.close();
     };
   },
 });
